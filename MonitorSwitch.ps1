@@ -342,14 +342,15 @@ function Show-Info {
 }
 
 # ---------- Credit / About ----------
+$AppVersion = '1.1.0'
 $AuthorName = 'Jeremia Sunny'
 $ProjectUrl = 'https://github.com/JEREMIA-SUNNY/monitor-switch'
 
 function Show-About {
-    $text = "Monitor Switch`r`n" +
+    $text = "Monitor Switch  v$AppVersion`r`n" +
         "Made by $AuthorName`r`n" +
         "$ProjectUrl`r`n`r`n" +
-        "Switch one monitor between your PC and laptop with a click or a hotkey.`r`n`r`n" +
+        "Switch one monitor between your PC and laptop with a click, a hotkey or your voice.`r`n`r`n" +
         "Free for personal and non-commercial use under the`r`n" +
         "PolyForm Noncommercial License 1.0.0. Commercial use needs permission.`r`n" +
         "If you share or change it, keep this credit and the license.`r`n`r`n" +

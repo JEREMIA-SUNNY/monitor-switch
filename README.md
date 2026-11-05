@@ -2,17 +2,28 @@
 
 ![Platform: Windows](https://img.shields.io/badge/platform-Windows%2010%20%7C%2011-0078D6)
 ![License: PolyForm Noncommercial](https://img.shields.io/badge/license-PolyForm%20Noncommercial%201.0.0-orange)
+![Version](https://img.shields.io/badge/version-1.1.0-brightgreen)
 
 Switch one monitor between two Windows computers with a click, a hotkey or your voice, instead of reaching for the monitor's **Input** button every time.
 
-Monitor Switch is a small tray app for setups like this one: a desktop PC is plugged into one input of a monitor (for example DisplayPort) and a laptop into another (for example HDMI). Run it on both computers. On whichever computer is on screen, click the tray icon or press **Ctrl + Alt + M**, and the monitor switches to the other computer.
+Monitor Switch is a small tray app for setups like this one: a desktop PC is plugged into one input of a monitor (for example DisplayPort) and a laptop into another (for example HDMI). Run it on both computers. On whichever computer is on screen, click the tray icon or press **Ctrl + Alt + M**, and the monitor switches to the other computer. You can also just say *"switch to laptop"*.
 
-- **One click or one hotkey** to switch, from either computer
-- **Voice commands** (optional): say *"switch to laptop"* or *"switch to PC"*. They work offline.
-- **No extra hardware**, no installer, no admin rights
-- **No network access**: it talks to the monitor over the video cable
-- **One readable PowerShell file**, so you can see exactly what it does
-- **Free for personal and non-commercial use** ([see the rules](#rules-for-using-this-project))
+> **🆕 New in 1.1:** voice commands. Say *"switch to laptop"* or *"switch to PC"*, offline and private. See [Voice commands](#voice-commands) and the [changelog](CHANGELOG.md).
+
+## Features
+
+- 🖱️ **One click or one hotkey** (**Ctrl + Alt + M**) switches to the other computer, from either side
+- 🎙️ **Voice commands** (optional): *"switch to laptop"* / *"switch to PC"*. They work offline, and nothing is recorded
+- 🧠 **Knows which computer it's on** (PC or laptop), so "switch" always goes the right way
+- 🎯 **Switch to PC / Switch to Laptop** menu items, to go to a specific computer
+- 🔁 **Swap PC / Laptop inputs**: a one-click fix for monitors that number their inputs the other way round
+- ⌨️ **Change hotkey...**: press any key combination you like. It warns you if another app already uses it
+- 🚀 **Start with Windows**, with no console window and no admin rights
+- ℹ️ **Monitor info** shows the computer, the hotkey and voice status, and what the monitor reports
+- 💻 **Command line** (`-Toggle`, `-To`, `-Info`) for shortcuts, macro keys or a Stream Deck
+- 🔌 **No extra hardware**, no installer, no network access: it talks to the monitor over the video cable
+- 📄 **One readable PowerShell file**, so you can see exactly what it does
+- 🆓 **Free for personal and non-commercial use** ([see the rules](#rules-for-using-this-project))
 
 ---
 
@@ -32,7 +43,8 @@ Monitor Switch is a small tray app for setups like this one: a desktop PC is plu
 4. A small monitor icon appears near the clock. If you don't see it, look under the **^** (hidden icons) and drag it onto the taskbar.
 5. Right-click the icon and turn on **Start with Windows**.
 6. Test it: right-click the icon and choose **Switch to Laptop**.
-   - If the monitor goes to the wrong computer, choose **Swap PC / Laptop inputs**. Do this on both computers.
+   - If the monitor goes to the wrong computer, choose **Swap PC / Laptop inputs**. Do this on both computers. It fixes the menu, the click, the hotkey and voice at the same time.
+7. Optional: right-click the icon and turn on **Voice commands**, then say *"switch to laptop"*.
 
 ## Using it
 
@@ -131,7 +143,7 @@ flowchart LR
 | Problem | Fix |
 |---|---|
 | Nothing happens when switching | Turn **DDC/CI on** in the monitor's menu. In **Monitor info**, "no reply" means commands aren't reaching the monitor. |
-| It goes to the wrong computer | Right-click the icon → **Swap PC / Laptop inputs** on both computers. |
+| It goes to the wrong computer (menu, click, hotkey or voice) | Right-click the icon → **Swap PC / Laptop inputs** on both computers. One swap fixes all of them. |
 | "No signal" after switching | Your monitor uses other codes. Try `-To 16`, `-To 18`, `-To 27` and so on, then set `$PcInput` / `$LaptopInput`. |
 | Menu shows hotkey **(OFF)** | Another app owns that combination. Use **Change hotkey...** |
 | Hover text names the wrong computer | Set `$ThisMachine = 'PC'` or `'Laptop'` at the top of the script. |
@@ -140,6 +152,14 @@ flowchart LR
 | Voice is on but doesn't react | Speak the exact phrase clearly, or lower `$VoiceConfidence` to `0.6`. **Monitor info** shows whether voice is running. |
 | Voice switches by itself | Raise `$VoiceConfidence` to `0.8`, or use longer, more unusual phrases. |
 | Double-clicking the `.cmd` does nothing | Run `powershell -ExecutionPolicy Bypass -File .\MonitorSwitch.ps1` in a terminal to see the error. On work laptops, company policy may block scripts. |
+
+## Updating
+
+1. Right-click the icon and choose **Exit**.
+2. Replace `MonitorSwitch.ps1` with the new version, on both computers.
+3. Double-click **Start Monitor Switch.cmd**.
+
+Your settings (swapped inputs, hotkey, voice, start with Windows) are kept. See [CHANGELOG.md](CHANGELOG.md) for what changed in each version.
 
 ## Uninstall
 
