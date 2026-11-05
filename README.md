@@ -3,11 +3,12 @@
 ![Platform: Windows](https://img.shields.io/badge/platform-Windows%2010%20%7C%2011-0078D6)
 ![License: PolyForm Noncommercial](https://img.shields.io/badge/license-PolyForm%20Noncommercial%201.0.0-orange)
 
-Switch one monitor between two Windows computers with a click or a hotkey, instead of reaching for the monitor's **Input** button every time.
+Switch one monitor between two Windows computers with a click, a hotkey or your voice, instead of reaching for the monitor's **Input** button every time.
 
 Monitor Switch is a small tray app for setups like this one: a desktop PC is plugged into one input of a monitor (for example DisplayPort) and a laptop into another (for example HDMI). Run it on both computers. On whichever computer is on screen, click the tray icon or press **Ctrl + Alt + M**, and the monitor switches to the other computer.
 
 - **One click or one hotkey** to switch, from either computer
+- **Voice commands** (optional): say *"switch to laptop"* or *"switch to PC"*. They work offline.
 - **No extra hardware**, no installer, no admin rights
 - **No network access**: it talks to the monitor over the video cable
 - **One readable PowerShell file**, so you can see exactly what it does
@@ -41,12 +42,28 @@ Monitor Switch is a small tray app for setups like this one: a desktop PC is plu
 | **Switch to PC / Switch to Laptop** | Switch to a specific computer |
 | **Swap PC / Laptop inputs** | Fix monitors that use the opposite input numbers (saved) |
 | **Change hotkey...** | Press any new key combination (saved) |
-| **Monitor info / input codes...** | Shows which computer this is, whether the hotkey is active, and what the monitor reports |
+| **Voice commands** | Turns voice control on or off (saved). See [Voice commands](#voice-commands) |
+| **Monitor info / input codes...** | Shows which computer this is, whether the hotkey and voice are active, and what the monitor reports |
 | **Start with Windows** | Starts the app automatically when you sign in |
 | **About Monitor Switch...** | Credits and a link to this page |
 | **Exit** | Closes the app |
 
 Hover over the icon to see which computer the app thinks it's running on, for example *Monitor Switch (PC)*.
+
+### Voice commands
+
+Right-click the icon and turn on **Voice commands**. Then say:
+
+| Say | What happens |
+|---|---|
+| *"switch to laptop"* | The monitor shows the laptop |
+| *"switch to PC"*, *"switch to computer"* or *"switch to desktop"* | The monitor shows the PC |
+
+- **Offline and private.** It uses the speech recognizer built into Windows (`System.Speech`). Audio stays on your computer: nothing is recorded, saved or sent anywhere. While voice is on, Windows shows its microphone-in-use icon in the taskbar.
+- **It only listens for these phrases.** Everything else you say is ignored.
+- **Turn it on for every computer that has a microphone.** If both computers hear you, they both send the same command, which is harmless. On purpose, there is no voice command meaning "switch to the other one": if both computers heard it, they would each switch in opposite directions.
+- **If only one computer has a microphone**, test whether it can switch the monitor while the *other* computer is on screen. Most monitors accept commands from the input that isn't showing, but some don't.
+- **You can change the phrases** in `$VoiceLaptop` and `$VoicePc` at the top of the script. If it triggers by itself (for example from a video), raise `$VoiceConfidence`. If it misses you, lower it.
 
 ### Command line
 
@@ -70,6 +87,9 @@ You can change most things from the tray menu. Those choices are saved per compu
 | `$ThisMachine` | `'Auto'` | `'Auto'`, `'PC'` or `'Laptop'`. Set this if auto-detection guesses wrong |
 | `$PcName`, `$LaptopName` | `PC (DisplayPort)`, `Laptop (HDMI)` | Labels shown in the menu |
 | `$HotkeyMods`, `$HotkeyKey` | `Ctrl+Alt`, `M` | Default hotkey |
+| `$VoiceLaptop` | `'switch to laptop'` | Phrases that switch to the laptop |
+| `$VoicePc` | `'switch to PC'`, `'switch to computer'`, `'switch to desktop'` | Phrases that switch to the PC |
+| `$VoiceConfidence` | `0.70` | 0.5 to 0.9. Higher means fewer false triggers |
 
 **Common input codes** (MCCS standard). Many monitors use these, but not all:
 
@@ -96,8 +116,9 @@ flowchart LR
 3. **Which way to switch.** You always press the button on the computer that's on screen, so *switch* simply means *go to the other one*. The app works out whether it's on the PC or the laptop from the Windows chassis type (`Win32_SystemEnclosure`), and checks for a battery as a fallback. You can override this with `$ThisMachine`.
 4. **Hotkey.** The hotkey is registered with the Windows `RegisterHotKey` API. Windows gives each combination to only one app. If another app already has it, the menu shows **(OFF)** and you can pick another combination.
 5. **Start with Windows.** This adds a per-user entry under `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`. The entry launches the app with `conhost.exe --headless`, so no console window appears.
+6. **Voice.** When you turn voice on, the app loads Windows' offline speech engine (`System.Speech.Recognition`) with a small grammar that contains only the phrases above. A recognized phrase is ignored unless its confidence is at least `$VoiceConfidence`. The speech code is compiled only when voice is turned on, so the rest of the app is unaffected if speech isn't available.
 
-**What it touches on your computer:** only `%APPDATA%\MonitorSwitch\settings.json`, plus the `Run` registry value if you turn on *Start with Windows*. It makes no network connections, installs no services, and needs no admin rights.
+**What it touches on your computer:** only `%APPDATA%\MonitorSwitch\settings.json`, plus the `Run` registry value if you turn on *Start with Windows*, plus the microphone while *Voice commands* is on. It makes no network connections, installs no services, and needs no admin rights.
 
 **Limitations**
 
@@ -114,6 +135,10 @@ flowchart LR
 | "No signal" after switching | Your monitor uses other codes. Try `-To 16`, `-To 18`, `-To 27` and so on, then set `$PcInput` / `$LaptopInput`. |
 | Menu shows hotkey **(OFF)** | Another app owns that combination. Use **Change hotkey...** |
 | Hover text names the wrong computer | Set `$ThisMachine = 'PC'` or `'Laptop'` at the top of the script. |
+| Voice: "No microphone found" | Connect or turn on a microphone. Check **Settings → Privacy & security → Microphone → Let desktop apps access your microphone**. |
+| Voice: "No Windows speech recognizer is installed" | Add the English speech pack under **Settings → Time & language → Speech** (or **Language & region → English → Language options**). Some newer Windows 11 builds no longer include the classic recognizer. If yours doesn't, the hotkey and the click still work. |
+| Voice is on but doesn't react | Speak the exact phrase clearly, or lower `$VoiceConfidence` to `0.6`. **Monitor info** shows whether voice is running. |
+| Voice switches by itself | Raise `$VoiceConfidence` to `0.8`, or use longer, more unusual phrases. |
 | Double-clicking the `.cmd` does nothing | Run `powershell -ExecutionPolicy Bypass -File .\MonitorSwitch.ps1` in a terminal to see the error. On work laptops, company policy may block scripts. |
 
 ## Uninstall

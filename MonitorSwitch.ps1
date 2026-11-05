@@ -14,8 +14,10 @@
 
     - Left-click the tray icon (bottom-right, near the clock)  -> switch screen
     - Or press  Ctrl + Alt + M                                  -> switch screen
+    - Or say  "switch to laptop" / "switch to PC"               -> voice (turn on in the menu)
     - Right-click the tray icon for: switch to PC / switch to laptop,
-      swap inputs, change hotkey, monitor info, start with Windows, about, exit.
+      swap inputs, change hotkey, voice commands, monitor info,
+      start with Windows, about, exit.
 
   It talks to the monitor through the video cable (DDC/CI) - the same thing
   the monitor's own Input button does. No extra hardware, nothing to install.
@@ -55,6 +57,12 @@ $PcName      = 'PC (DisplayPort)'
 $LaptopName  = 'Laptop (HDMI)'
 $HotkeyMods  = 'Ctrl+Alt'    # default hotkey
 $HotkeyKey   = 'M'
+
+# Voice commands - turn on with right-click > "Voice commands".
+# Uses Windows' built-in offline speech recognizer. Nothing is recorded or sent anywhere.
+$VoiceLaptop     = @('switch to laptop')                                      # say one of these -> laptop
+$VoicePc         = @('switch to PC', 'switch to computer', 'switch to desktop')  # say one of these -> PC
+$VoiceConfidence = 0.70      # 0.5 - 0.9. Higher = fewer false triggers, but you may need to speak clearer
 # ==============================================================================
 
 Add-Type -AssemblyName System.Windows.Forms
@@ -315,9 +323,12 @@ function Show-Info {
     $hkState = if (-not $script:Hotkey) { 'tray app not running in this window' }
                elseif ($script:Hotkey.Registered) { 'active' }
                else { 'OFF - another app is using it (right-click > Change hotkey...)' }
+    $voiceState = if ($script:Voice) { "ON (speech: $($script:Voice.RecognizerName)) - say '$($VoiceLaptop[0])' or '$($VoicePc[0])'" }
+                  else { 'off (right-click > Voice commands)' }
     $text = "This computer is: $($script:Me)    (ThisMachine = '$ThisMachine')`r`n" +
         "Click / hotkey switches to: $other`r`n" +
-        "Hotkey: $(Get-HotkeyLabel) - $hkState`r`n`r`n" +
+        "Hotkey: $(Get-HotkeyLabel) - $hkState`r`n" +
+        "Voice: $voiceState`r`n`r`n" +
         "Input codes in use:`r`n" +
         "    PcInput     = $PcInput    ($PcName)`r`n" +
         "    LaptopInput = $LaptopInput    ($LaptopName)`r`n`r`n" +
@@ -390,6 +401,9 @@ function Read-Settings {
                 $script:PcInput     = [int]$s.PcInput
                 $script:LaptopInput = [int]$s.LaptopInput
             }
+            if ($null -ne $s.VoiceEnabled) {
+                $script:VoiceOn = [bool]$s.VoiceEnabled
+            }
         }
     } catch {}
 }
@@ -401,8 +415,9 @@ function Save-Settings {
         [pscustomobject]@{
             HotkeyMods  = $script:HotkeyMods
             HotkeyKey   = $script:HotkeyKey
-            PcInput     = $script:PcInput
-            LaptopInput = $script:LaptopInput
+            PcInput      = $script:PcInput
+            LaptopInput  = $script:LaptopInput
+            VoiceEnabled = [bool]$script:VoiceOn
         } | ConvertTo-Json | Set-Content -LiteralPath $SettingsFile -Encoding UTF8
     } catch {
         Show-Message "Couldn't save settings: $($_.Exception.Message)" 'Warning'
@@ -413,6 +428,252 @@ function Invoke-SwapInputs {
     $script:PcInput, $script:LaptopInput = $script:LaptopInput, $script:PcInput
     Save-Settings
     Show-Message "Swapped and saved. PC = input $($script:PcInput), Laptop = input $($script:LaptopInput).`nDo the same on the other computer."
+}
+
+# ---------- Voice commands (offline Windows speech recognition) ----------
+# Only compiled and started when you turn voice on, so the rest of the app
+# keeps working even if speech isn't available on this PC.
+$script:Voice     = $null     # the running listener
+$script:VoiceOn   = $false    # saved choice from the menu
+$script:VoiceItem = $null
+
+function Initialize-VoiceType {
+    if ('MonSwitch.Voice' -as [type]) { return }
+    Add-Type -AssemblyName System.Speech
+    Add-Type -ReferencedAssemblies System.Speech, System.Windows.Forms, System.Drawing -TypeDefinition @'
+using System;
+using System.Globalization;
+using System.Speech.Recognition;
+using System.Windows.Forms;
+
+namespace MonSwitch
+{
+    public class VoiceEventArgs : EventArgs
+    {
+        private readonly string _command;
+        private readonly string _text;
+        private readonly float _confidence;
+
+        public VoiceEventArgs(string command, string text, float confidence)
+        {
+            _command = command;
+            _text = text;
+            _confidence = confidence;
+        }
+
+        public string Command { get { return _command; } }
+        public string Text { get { return _text; } }
+        public float Confidence { get { return _confidence; } }
+    }
+
+    public class Voice : IDisposable
+    {
+        private SpeechRecognitionEngine _engine;
+        private Control _ui;
+        private readonly float _minConfidence;
+        private volatile bool _disposed;
+
+        // Both events are raised on the UI thread (the thread that created this object).
+        public event EventHandler<VoiceEventArgs> Command;
+        public event EventHandler<VoiceEventArgs> Stopped;
+
+        public string RecognizerName { get; private set; }
+
+        public static int RecognizerCount()
+        {
+            return SpeechRecognitionEngine.InstalledRecognizers().Count;
+        }
+
+        // The phrases are English, so prefer an English recognizer.
+        private static RecognizerInfo Pick()
+        {
+            var all = SpeechRecognitionEngine.InstalledRecognizers();
+            if (all.Count == 0) return null;
+            CultureInfo ui = CultureInfo.CurrentUICulture;
+            if (ui.TwoLetterISOLanguageName == "en")
+            {
+                foreach (RecognizerInfo r in all)
+                    if (string.Equals(r.Culture.Name, ui.Name, StringComparison.OrdinalIgnoreCase)) return r;
+            }
+            foreach (RecognizerInfo r in all)
+                if (string.Equals(r.Culture.Name, "en-US", StringComparison.OrdinalIgnoreCase)) return r;
+            foreach (RecognizerInfo r in all)
+                if (r.Culture.TwoLetterISOLanguageName == "en") return r;
+            return all[0];
+        }
+
+        public Voice(string[] phrases, string[] commands, float minConfidence)
+        {
+            if (phrases == null || commands == null || phrases.Length == 0 || phrases.Length != commands.Length)
+                throw new ArgumentException("The voice phrases at the top of MonitorSwitch.ps1 are not set up correctly.");
+            _minConfidence = minConfidence;
+
+            try
+            {
+                // A hidden control on the UI thread, used to hand results back to that thread.
+                _ui = new Control();
+                if (_ui.Handle == IntPtr.Zero)
+                    throw new InvalidOperationException("Could not create a window for voice commands.");
+
+                RecognizerInfo info = Pick();
+                if (info == null)
+                    throw new InvalidOperationException("No Windows speech recognizer is installed on this computer.");
+                RecognizerName = info.Culture.Name;
+
+                _engine = new SpeechRecognitionEngine(info);
+
+                Choices choices = new Choices();
+                for (int i = 0; i < phrases.Length; i++)
+                    choices.Add(new SemanticResultValue(phrases[i], commands[i]).ToGrammarBuilder());
+
+                GrammarBuilder builder = new GrammarBuilder();
+                builder.Culture = info.Culture;
+                builder.Append(new SemanticResultKey("cmd", choices.ToGrammarBuilder()).ToGrammarBuilder());
+                _engine.LoadGrammar(new Grammar(builder));
+
+                try
+                {
+                    _engine.SetInputToDefaultAudioDevice();
+                }
+                catch (Exception ex)
+                {
+                    throw new InvalidOperationException("No microphone found. Connect or turn on a microphone, then try again.", ex);
+                }
+
+                _engine.SpeechRecognized += OnRecognized;
+                _engine.RecognizeCompleted += OnCompleted;
+                _engine.RecognizeAsync(RecognizeMode.Multiple);
+            }
+            catch
+            {
+                Dispose();
+                throw;
+            }
+        }
+
+        private void OnRecognized(object sender, SpeechRecognizedEventArgs e)
+        {
+            RecognitionResult r = e.Result;
+            if (r == null || r.Confidence < _minConfidence) return;
+            if (r.Semantics == null || !r.Semantics.ContainsKey("cmd")) return;
+            object value = r.Semantics["cmd"].Value;
+            if (value == null) return;
+            Post(Command, new VoiceEventArgs(value.ToString(), r.Text, r.Confidence));
+        }
+
+        private void OnCompleted(object sender, RecognizeCompletedEventArgs e)
+        {
+            if (_disposed || e.Cancelled) return;
+            string why = e.Error != null ? e.Error.Message : "the microphone stopped sending sound.";
+            Post(Stopped, new VoiceEventArgs("stopped", why, 0f));
+        }
+
+        private void Post(EventHandler<VoiceEventArgs> handler, VoiceEventArgs args)
+        {
+            Control ui = _ui;
+            if (handler == null || ui == null || _disposed || ui.IsDisposed || !ui.IsHandleCreated) return;
+            try
+            {
+                ui.BeginInvoke(new MethodInvoker(delegate
+                {
+                    if (!_disposed) handler(this, args);
+                }));
+            }
+            catch (InvalidOperationException)
+            {
+                // window already gone - app is closing
+            }
+        }
+
+        public void Dispose()
+        {
+            if (_disposed) return;
+            _disposed = true;
+
+            SpeechRecognitionEngine engine = _engine;
+            _engine = null;
+            if (engine != null)
+            {
+                engine.SpeechRecognized -= OnRecognized;
+                engine.RecognizeCompleted -= OnCompleted;
+                try { engine.RecognizeAsyncCancel(); } catch (Exception) { }
+                try { engine.Dispose(); } catch (Exception) { }
+            }
+
+            Control ui = _ui;
+            _ui = null;
+            if (ui != null) ui.Dispose();
+        }
+    }
+}
+'@
+}
+
+function Get-InnerMessage($err) {
+    $ex = $err.Exception
+    while ($ex.InnerException) { $ex = $ex.InnerException }
+    return $ex.Message
+}
+
+function Invoke-VoiceCommand([string]$command) {
+    switch ($command) {
+        'laptop' { Switch-Input $script:LaptopInput }
+        'pc'     { Switch-Input $script:PcInput }
+    }
+}
+
+function Start-Voice {
+    if ($script:Voice) { return $true }
+    try {
+        Initialize-VoiceType
+        $phrases  = New-Object System.Collections.Generic.List[string]
+        $commands = New-Object System.Collections.Generic.List[string]
+        foreach ($p in @($VoiceLaptop)) { if ("$p".Trim()) { $phrases.Add("$p".Trim()); $commands.Add('laptop') } }
+        foreach ($p in @($VoicePc))     { if ("$p".Trim()) { $phrases.Add("$p".Trim()); $commands.Add('pc') } }
+
+        $v = [MonSwitch.Voice]::new($phrases.ToArray(), $commands.ToArray(), [float]$VoiceConfidence)
+        $v.add_Command({ param($s, $e) Invoke-VoiceCommand $e.Command })
+        $v.add_Stopped({
+            param($s, $e)
+            Stop-Voice
+            Update-VoiceUi
+            Show-Message "Voice commands stopped: $($e.Text)`nClick 'Voice commands' in the menu to start again." 'Warning'
+        })
+        $script:Voice = $v
+        return $true
+    } catch {
+        $script:Voice = $null
+        $why = Get-InnerMessage $_
+        Show-Message ("Voice commands couldn't start: $why`n" +
+            "Check that a microphone is connected and that Settings > Privacy & security > Microphone > " +
+            "'Let desktop apps access your microphone' is ON.") 'Warning'
+        return $false
+    }
+}
+
+function Stop-Voice {
+    $v = $script:Voice
+    $script:Voice = $null
+    if ($v) { try { $v.Dispose() } catch {} }
+}
+
+function Update-VoiceUi {
+    if ($script:VoiceItem) { $script:VoiceItem.Checked = [bool]$script:Voice }
+}
+
+function Set-VoiceEnabled([bool]$on) {
+    if ($on) {
+        if (Start-Voice) {
+            $script:VoiceOn = $true
+            Save-Settings
+            Show-Message "Voice commands ON. Say:`n""$(@($VoiceLaptop)[0])""  or  ""$(@($VoicePc)[0])"""
+        }
+    } else {
+        Stop-Voice
+        $script:VoiceOn = $false
+        Save-Settings
+    }
+    Update-VoiceUi
 }
 
 function Update-HotkeyUi {
@@ -599,6 +860,7 @@ Add-Separator
 Add-Separator
 [void](Add-Item 'Swap PC / Laptop inputs' { Invoke-SwapInputs })
 [void](Add-Item 'Change hotkey...' { Show-HotkeyDialog })
+$script:VoiceItem = Add-Item 'Voice commands' { Set-VoiceEnabled (-not $script:VoiceItem.Checked) }
 [void](Add-Item 'Monitor info / input codes...' { Show-Info })
 $autoItem = Add-Item 'Start with Windows' { param($s) $s.Checked = -not $s.Checked; Set-Autostart $s.Checked }
 $autoItem.Checked = Test-Autostart
@@ -625,9 +887,14 @@ if (-not $script:Hotkey.Registered) {
     Show-Message "Running in the tray. Click the icon or press $(Get-HotkeyLabel) to switch screens."
 }
 
+# Turn voice back on if it was on last time (if it fails now, it tries again next start)
+if ($script:VoiceOn) { [void](Start-Voice) }
+Update-VoiceUi
+
 [System.Windows.Forms.Application]::Run()
 
 # cleanup on Exit
+Stop-Voice
 $script:Hotkey.Dispose()
 $tray.Visible = $false
 $tray.Dispose()
